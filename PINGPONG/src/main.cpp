@@ -32,21 +32,35 @@ RTC_DATA_ATTR RtcData_t rtc_game_state = {0x0000, 0, 0, STATE_TITLE_SCREEN, STAT
 // ==========================================================
 // Añade esta variable estática dentro de OnDataRecv en Main.cpp
 void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) {
+    // 1. Creamos una estructura temporal limpia
     AccelData_t receivedData;
-    memcpy(&receivedData, incomingData, sizeof(receivedData));
+    memset(&receivedData, 0, sizeof(receivedData));
 
-    portENTER_CRITICAL(&scoreMux);
-    pongGame.remote_joy_y_val = receivedData.joy_y_val;
-    pongGame.remote_control_active = true;
-    pongGame.last_remote_packet = millis();
-    
-    // Guardamos el estado bruto del botón remoto
-    pongGame.remote_btn_pressed = receivedData.btn_pressed; 
-    portEXIT_CRITICAL(&scoreMux);
+    // 2. Forzamos la copia de bytes (ignorando lo que crea el compilador del tamaño)
+    if (len >= 7) { 
+        memcpy(&receivedData, incomingData, 7); // Forzamos 7 bytes que es lo que envía el mando
 
-    pongGame.last_activity_time = millis();
+        portENTER_CRITICAL(&scoreMux);
+        
+        // DEBUG para ver qué llega exactamente
+
+        if (receivedData.player_id == 1) {
+            pongGame.remote_joy_y_val = receivedData.joy_y_val;
+            pongGame.remote_control_active = true;
+            pongGame.last_remote_packet = millis();
+            pongGame.remote_btn_pressed = receivedData.btn_pressed;
+        } 
+        else if (receivedData.player_id == 2) {
+            pongGame.remote_joy_y_val_j2 = receivedData.joy_y_val;
+            pongGame.remote_control_active_j2 = true;
+            pongGame.last_remote_packet_j2 = millis();
+            pongGame.remote_btn_pressed_j2 = receivedData.btn_pressed;
+        }
+        portEXIT_CRITICAL(&scoreMux);
+        
+        pongGame.last_activity_time = millis();
+    }
 }
-
 // ==========================================================
 //     *** FUNCIONES DE TAREA DE FREERTOS ***
 // ==========================================================

@@ -13,9 +13,10 @@
 // --- ESTRUCTURA DE COMUNICACIÓN ESP-NOW ---
 // Enviamos la posición Y del joystick/acelerómetro (0-4095)
 typedef struct struct_message {
-    int16_t joy_y_val;
-    bool btn_pressed; // <-- Nuevo campo
-} AccelData_t;
+    int player_id;      // 4 bytes
+    int16_t joy_y_val;  // 2 bytes
+    bool btn_pressed;   // 1 byte
+} __attribute__((packed)) AccelData_t;
 
 // Declaración de los tipos de estados (necesario antes de la estructura RTC)
 typedef enum {
@@ -78,6 +79,10 @@ public:
     int score_p1; 
     int score_p2;
 
+    // En Juego.h, dentro de la clase Juego
+    int dificultadIA = 1; // 0: Fácil, 1: Normal, 2: Difícil
+    bool eligiendoDificultad = false; // Controla si mostramos el submenú
+
     // --- VARIABLES DE COMUNICACIÓN ---
     // Valor recibido del acelerómetro/joystick remoto (0-4095)
     volatile int remote_joy_y_val = 2048; 
@@ -87,6 +92,12 @@ public:
     volatile unsigned long last_remote_packet = 0;
     volatile bool remote_btn_pressed = false; // Estado actual del botón remoto
 
+    // --- VARIABLES DE COMUNICACIÓN J2 ---
+    volatile int remote_joy_y_val_j2 = 2048; 
+    volatile bool remote_control_active_j2 = false;
+    volatile unsigned long last_remote_packet_j2 = 0;
+    volatile bool remote_btn_pressed_j2 = false;
+
     // Variable de Detección de Actividad
     unsigned long last_activity_time; // Guarda el último momento de interacción
 
@@ -95,6 +106,7 @@ public:
     unsigned long last_debounce_time;
     const unsigned long debounce_delay = 50;
     int btn1_debounced_state;
+    int btn2_debounced_state;
     bool btn1_just_pressed; // Bandera de flanco
 
     // Variables de Botón 2 (Confirmar/Regresar)

@@ -27,6 +27,7 @@ Juego::Juego()
       btn1_last_state(HIGH),
       last_debounce_time(0),
       btn1_debounced_state(HIGH),
+      btn2_debounced_state(HIGH),
       btn1_just_pressed(false),
       btn2_just_pressed(false),
       last_activity_time(millis()) // Inicialización correcta
@@ -45,71 +46,91 @@ void Juego::reiniciarJuego() {
 
 // --- Lógica básica para que la Paleta 2 siga a la Pelota (IA)
 void Juego::logica_IA() {
-    // 1. Encontrar el centro de la pelota.
+    // 1. Encontrar el centro de la pelota
     int target_y = (int)pelota.y + pelota.TAMANO / 2;
-
-    // 2. Mapear la posición Y de la pelota a un valor de Joystick (0-4095)
     int paleta_max_y = 64 - paleta2.ALTO;
 
-    // Calcular el punto Y objetivo donde debe estar el BORDE SUPERIOR de la paleta
-    int target_top_y = target_y - (paleta2.ALTO / 2);
+    // --- LÓGICA DE DIFICULTAD ---
+    int margen_error;
+    float velocidad_suavizado;
 
-    // Aseguramos que el punto objetivo esté dentro de los límites posibles de la paleta
+    switch(dificultadIA) {
+        case 0: // FÁCIL: La IA es lenta y se despista mucho
+            margen_error = 15; 
+            velocidad_suavizado = 0.05; // Reacciona muy lento
+            break;
+        case 1: // NORMAL: Equilibrio
+            margen_error = 7;
+            velocidad_suavizado = 0.15; 
+            break;
+        case 2: // DIFÍCIL: Casi perfecta
+        default:
+            margen_error = 2;
+            velocidad_suavizado = 0.4; 
+            break;
+    }
+
+    // 2. Solo moverse si la pelota está fuera del "margen de error" 
+    // Esto evita que la paleta vibre y permite que falle si la pelota va muy rápido
+    static float y_suave = 32; // Posición interna para suavizar movimiento
+    
+    if (abs(target_y - (y_suave + paleta2.ALTO/2)) > margen_error) {
+        // La paleta intenta alcanzar el objetivo pero no instantáneamente
+        y_suave += (target_y - (y_suave + paleta2.ALTO/2)) * velocidad_suavizado;
+    }
+
+    // 3. Calcular el punto Y superior y restringirlo
+    int target_top_y = (int)y_suave - (paleta2.ALTO / 2);
     target_top_y = constrain(target_top_y, 0, paleta_max_y);
 
-    // 3. Simular el valor del Joystick necesario para alcanzar ese 'target_top_y'
+    // 4. Mapear a 0-4095 para usar tu sistema de actualización de posición
     float joy_float = (float)target_top_y * 4095.0f / (float)paleta_max_y;
-    int joy_simulado = (int)joy_float;
-
-    // 4. Aplicar el valor simulado
-    paleta2.actualizarPosicion(joy_simulado);
+    paleta2.actualizarPosicion((int)joy_float);
 }
-
 // --- Manejo de la entrada del Botón 1 y Botón 2 (Flanco descendente debounced, Confirmar)
 void Juego::checkInput() {
-    // --- Lógica para Botón 1 (J1) + REMOTO ---
+    // 1. Leer pines locales
     int reading1 = digitalRead(PIN_BUTTON_1);
+    int reading2 = digitalRead(PIN_BUTTON_2);
     
-    // Aseguramos que si no hay control remoto activo, la señal sea falsa
+    // 2. Limpiar señales remotas si el mando se desconecta
     if (!remote_control_active) remote_btn_pressed = false;
+    if (!remote_control_active_j2) remote_btn_pressed_j2 = false;
 
-    // LÓGICA OR: Se considera "presionado" si el pin local es LOW O si el remoto es true
+    // 3. LÓGICA OR (CORREGIDA): J1 local o remoto / J2 local o remoto
     bool btn1_active = (reading1 == LOW) || remote_btn_pressed;
+    bool btn2_active = (reading2 == LOW) || remote_btn_pressed_j2; // Aquí estaba el error (tenías reading1)
 
+    // Reiniciamos flancos
     btn1_just_pressed = false;
+    btn2_just_pressed = false;
 
-    // Usamos la lógica de flanco del Botón 2 que mencionas que sí te funciona
+    // --- PROCESAR JUGADOR 1 ---
     if (btn1_active && btn1_debounced_state == HIGH) {
-        btn1_just_pressed = true; // Flanco detectado (Local o Remoto)
+        btn1_just_pressed = true; 
         btn1_debounced_state = LOW;
         last_activity_time = millis(); 
-        Serial.println("Click detectado: Boton 1 (Local o Remoto)");
+        Serial.println("Click: Jugador 1 (Local o Remoto)");
     }
     else if (!btn1_active && btn1_debounced_state == LOW) {
         btn1_debounced_state = HIGH;
     }
-    
-    // Actualizamos el last_state por compatibilidad
-    btn1_last_state = reading1;
 
-    // --- Lógica para Botón 2 (J2 / Pausa) ---
-    // (Mantenemos esta lógica ya que confirmas que es la que funciona)
-    static int btn2_last_reading = HIGH;
-    static int b2_debounced_state_internal = HIGH; 
-    int reading2 = digitalRead(PIN_BUTTON_2);
-
-    btn2_just_pressed = false;
-
-    // Detección de flanco simple para Botón 2
-    if (reading2 == LOW && b2_debounced_state_internal == HIGH) {
+    // --- PROCESAR JUGADOR 2 ---
+    if (btn2_active && btn2_debounced_state == HIGH) {
         btn2_just_pressed = true; 
-        b2_debounced_state_internal = LOW;
+        btn2_debounced_state = LOW;
         last_activity_time = millis(); 
+        Serial.println("Click: Jugador 2 (Local o Remoto)");
     }
-    else if (reading2 == HIGH && b2_debounced_state_internal == LOW) {
-        b2_debounced_state_internal = HIGH;
+    else if (!btn2_active && btn2_debounced_state == LOW) {
+        btn2_debounced_state = HIGH;
     }
-    btn2_last_reading = reading2;
+    
+    // Guardar estados anteriores (opcional, por compatibilidad)
+    btn1_last_state = reading1;
+    // Si usas btn2_last_state en Juego.h, añádelo aquí:
+    // btn2_last_state = reading2; 
 }
 
 // --- Implementación del Deep Sleep ---
@@ -184,16 +205,19 @@ void Juego::actualizarLogica() {
     // 1. Lectura y procesamiento de entradas
     checkInput();
 
-    // Leer joysticks ANTES de la lógica para detectar actividad
+ // Leer joysticks ANTES de la lógica para detectar actividad
     int joy1_val_local = analogRead(PIN_JOYSTICK_1_Y);
     int joy2_val = analogRead(PIN_JOYSTICK_2_Y);
     int joy1_val_final; // Valor que se usará para Paleta 1
-
+    int joy2_val_final;
     // --- MANEJO DEL CONTROL REMOTO (Remote Control Handler) ---
     portENTER_CRITICAL(&scoreMux);
     // Desactivar el control remoto si no se ha recibido nada en 100ms
     if (remote_control_active && (millis() - last_remote_packet) > 100) {
         remote_control_active = false;
+    }
+    if (remote_control_active_j2 && (millis() - last_remote_packet_j2) > 100) {
+        remote_control_active_j2 = false;
         // Serial.println("Control remoto inactivo."); // Descomentar para debug
     }
 
@@ -202,6 +226,12 @@ void Juego::actualizarLogica() {
     } else {
         joy1_val_final = joy1_val_local;
     }
+    if (remote_control_active_j2) {
+        joy2_val_final = remote_joy_y_val_j2;
+    } else {
+        joy2_val_final = joy2_val;
+    }
+   
     portEXIT_CRITICAL(&scoreMux);
 
     // --- REINICIO DE CONTADOR POR MOVIMIENTO DE JOYSTICK ---
@@ -232,7 +262,7 @@ void Juego::actualizarLogica() {
     // Si estamos en IDLE, la única actividad que hacemos es verificar si salir.
     if (gameState == STATE_IDLE) {
         // Verificar actividad de botones o joysticks (local o remota)
-        if (btn1_just_pressed || btn2_just_pressed || abs(joy1_val_local - 2048) > THRESHOLD ||  remote_control_active) {
+        if (btn1_just_pressed || btn2_just_pressed || abs(joy1_val_local - 2048) > THRESHOLD ||  remote_control_active||  remote_control_active_j2) {
 
              GameState_t previous_state = state_before_idle;
 
@@ -259,8 +289,25 @@ void Juego::actualizarLogica() {
     // Lógica unificada para el movimiento del menú (Joystick 1 O Joystick 2)
     // Se usa el joy local para navegación en menú
     // <-- INICIO CAMBIO -->
-    bool move_up = (joy1_val_final < THRESHOLD_UP_MENU);
-    bool move_down = (joy1_val_final > THRESHOLD_DOWN_MENU);
+    // Lógica independiente: Si J1 O J2 se mueven, se activa la bandera
+    // 1. Lectura de valores finales (considerando remoto o local)
+    // Esto debe estar antes de la máquina de estados
+    // --- DETECCIÓN INDEPENDIENTE ---
+    // Forzar valores a 2048 (centro) si están cerca para evitar que un joystick bloquee al otro
+    if (abs(joy1_val_final - 2048) < 300) joy1_val_final = 2048;
+    if (abs(joy2_val_final - 2048) < 300) joy2_val_final = 2048;
+    // Joystick 1
+    bool j1_sube = (joy1_val_final < THRESHOLD_UP_MENU);
+    bool j1_baja = (joy1_val_final > THRESHOLD_DOWN_MENU);
+
+    // Joystick 2 (CORREGIDO: aquí estaba el error de lógica)
+    bool j2_sube = (remote_joy_y_val_j2 < THRESHOLD_UP_MENU);
+    bool j2_baja = (remote_joy_y_val_j2 > THRESHOLD_DOWN_MENU);
+
+    // --- COMBINACIÓN FINAL ---
+    // El menú se mueve si CUALQUIERA de los dos actúa
+    bool move_up = j1_sube || j2_sube;
+    bool move_down  = j1_baja || j2_baja;
     // <-- FIN CAMBIO -->
 
     // 2. Máquina de Estados
@@ -271,34 +318,53 @@ void Juego::actualizarLogica() {
             }
             break;
 
-        case STATE_PLAYER_SELECT:
-            // --- NAVEGACIÓN DEL MENÚ (Corregida con temporizador) ---
-            if ((millis() - last_menu_move_time) > MENU_MOVE_DELAY) {
-                if (move_up) {
-                    if (menuSelection > 0) menuSelection--;
-                    last_menu_move_time = millis(); // Reinicia el temporizador
-                } else if (move_down) {
-                    if (menuSelection < 1) menuSelection++;
-                    last_menu_move_time = millis(); // Reinicia el temporizador
+    case STATE_PLAYER_SELECT:
+        // --- NAVEGACIÓN DEL MENÚ ---
+        if ((millis() - last_menu_move_time) > MENU_MOVE_DELAY) {
+            if (move_up) {
+                if (menuSelection > 0) {
+                    menuSelection--;
+                    last_menu_move_time = millis();
+                }
+            } else if (move_down) {
+                // Si estamos eligiendo dificultad hay 3 opciones (0,1,2), si no solo 2 (0,1)
+                int limiteMax = eligiendoDificultad ? 2 : 1;
+                if (menuSelection < limiteMax) {
+                    menuSelection++;
+                    last_menu_move_time = millis();
                 }
             }
-            // --- FIN NAVEGACIÓN ---
+        }
 
-            // Confirmar selección (Botón 1 O Botón 2)
+        // --- LÓGICA DE CONFIRMACIÓN ---
             if (confirm_pressed) {
-                if (menuSelection == 0) {
-                    gameState = STATE_VS_PLAYER;
-                    last_active_state = STATE_VS_PLAYER;
-                } else {
-                    gameState = STATE_VS_AI;
-                    last_active_state = STATE_VS_AI;
-                }
-
+                if (!eligiendoDificultad) { 
+                    if (menuSelection == 0) { // --- CASO 2 JUGADORES ---
+                        eligiendoDificultad = false; // <--- ASEGURAR QUE ESTÉ EN FALSE
+                        gameState = STATE_VS_PLAYER;
+                        last_active_state = STATE_VS_PLAYER;
+                        score_p1 = 0;
+                        score_p2 = 0;
+                        pelota.reiniciar();
+                        last_activity_time = millis(); // Reset para que no entre en sleep
+                        Serial.println("Iniciando Modo 2 Jugadores"); // Debug
+                    } else { // --- CASO VS MÁQUINA ---
+                        eligiendoDificultad = true; 
+                        menuSelection = 0; 
+                        last_menu_move_time = millis();
+                    }
+            } else {
+                // --- ESTAMOS ELIGIENDO DIFICULTAD ---
+                dificultadIA = menuSelection;
+                gameState = STATE_VS_AI;
+                last_active_state = STATE_VS_AI;
+                eligiendoDificultad = false; // Reset para la próxima vez
                 score_p1 = 0;
                 score_p2 = 0;
                 pelota.reiniciar();
             }
-            break;
+        }
+        break;
 
         case STATE_VS_PLAYER:
         case STATE_VS_AI:
@@ -318,7 +384,7 @@ void Juego::actualizarLogica() {
             // --- ACTUALIZACIÓN DE PALETAS CON CONTROL REMOTO/LOCAL ---
             if (gameState == STATE_VS_PLAYER) {
                 paleta1.actualizarPosicion(joy1_val_final); // Usa valor final (local o remoto)
-                paleta2.actualizarPosicion(joy2_val);
+                paleta2.actualizarPosicion(joy2_val_final);
             } else { // STATE_VS_AI
                 paleta1.actualizarPosicion(joy1_val_final); // Usa valor final (local o remoto)
                 logica_IA();
@@ -447,22 +513,25 @@ void Juego::dibujarPantalla() {
                 u8g2.setFont(u8g2_font_7x14B_tf);
                 u8g2.drawStr(10, 50, "Presiona BOTON 1");
                 break;
-
             case STATE_PLAYER_SELECT:
                 u8g2.setFont(u8g2_font_7x14B_tf);
-                u8g2.drawStr(20, 15, "MODO DE JUEGO");
-
-                // Opciones del menú...
-                u8g2.setFont(menuSelection == 0 ? u8g2_font_7x14B_tf : u8g2_font_7x14_tf);
-                u8g2.drawStr(30, 35, "2 JUGADORES");
-
-                u8g2.setFont(menuSelection == 1 ? u8g2_font_7x14B_tf : u8g2_font_7x14_tf);
-                u8g2.drawStr(30, 50, "VS MAQUINA");
-
-                u8g2.setFont(u8g2_font_4x6_tf);
-                u8g2.drawStr(0, 63, "J1/J2: Confirmar | J2: Regresar");
+                
+                if (!eligiendoDificultad) {
+                    u8g2.drawStr(20, 15, "MODO DE JUEGO");
+                    u8g2.setFont(menuSelection == 0 ? u8g2_font_7x14B_tf : u8g2_font_7x14_tf);
+                    u8g2.drawStr(30, 35, "2 JUGADORES");
+                    u8g2.setFont(menuSelection == 1 ? u8g2_font_7x14B_tf : u8g2_font_7x14_tf);
+                    u8g2.drawStr(30, 50, "VS MAQUINA");
+                } else {
+                    u8g2.drawStr(20, 15, "DIFICULTAD IA");
+                    u8g2.setFont(menuSelection == 0 ? u8g2_font_7x14B_tf : u8g2_font_7x14_tf);
+                    u8g2.drawStr(35, 30, "FACIL");
+                    u8g2.setFont(menuSelection == 1 ? u8g2_font_7x14B_tf : u8g2_font_7x14_tf);
+                    u8g2.drawStr(35, 45, "NORMAL");
+                    u8g2.setFont(menuSelection == 2 ? u8g2_font_7x14B_tf : u8g2_font_7x14_tf);
+                    u8g2.drawStr(35, 60, "DIFICIL");
+                }
                 break;
-
             case STATE_VS_PLAYER:
             case STATE_VS_AI:
                 // --- PANTALLA DE JUEGO ---
